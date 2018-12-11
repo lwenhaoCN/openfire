@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Title</title>
+</head>
+
+<script src="ObjTree.js"></script>
+<script src="jkl-dumper.js"></script>
+
+<!--<script src="common/js/v1.7.2-jquery.min.js"></script>-->
+<script>
+  //状态
+  var connectionstate = ["正在连接..", "连接已建立", "正在关闭..", "已经关闭"];
+  //地址
+  var host = "ws://192.168.2.11:7070/ws/";
+
+  //域名
+  //var to = "liuwenhao-pc";
+  var to = "lvs-backup-1";
+  var xmlns = "urn:ietf:params:xml:ns:xmpp-framing";
+  var version = "1.0";
+  var xmllang = "zh";
+  var resource = "appClient";
+  //JID
+  var from = null;
+  var websocket = null;
+  var id = null;
+  var username = null;
+  var password = null;
+
+  //文件
+  var file = null;
+  var filename = null;
+
+  var islogin = false;
+  window.onload = function () {
+    document.getElementById("isloginsuccess").innerHTML = "未登录！";
+    document.querySelector('#myFile').onchange = function() {
+      filename = this.files[0].name;
+      console.log(this.files);
+      console.log(this.files[0].name);
+      console.log(this.files[0].size);
+      console.log(this.files[0].type);
+      var input  = document.getElementById('myFile');
+      var a = WebIM.utils.getFileUrl(input);
+      console.log(a);
+      file = a;
+//      var typedArray = [this.files[0].name,this.files[0].type];
+//      var filetype = this.files[0].type;
+//      var blob = new Blob([typedArray], {type: filetype});
+//      var url = URL.createObjectURL(blob);
+//
+
+     // var file = this.files[0];
+      //文件转化为二进制
+     // var blob = null;
+    //  url = window.URL.createObjectURL(file);
+
+     // console.log(url);
+     // dataURLtoBlob(url);
+//      var reader = new FileReader();
+//      reader.readAsBinaryString(file);
+//      reader.onloadend = function () {
+//        // 这个事件在读取结束后，无论成功或者失败都会触发
+//        if (reader.error) {
+//          console.log(reader.error);
+//        } else {
+//          //uploadAndSubmit2();
+//          console.log(reader.result);
+//        }
+//      }
+    };
+  }
+
+
+  function dataURLtoBlob(dataurl) {
+    var arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
+      bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+    while(n--){
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], {type:mime});
+  }
+
+
+
+  function connopenfire() {
+
+  }
+
+  //连接成功建立的回调方法
+  function wsopen() {
+    console.log(connectionstate[websocket.readyState]);
+    connwsopen();
+  }
+
+  //连接发生错误的回调方法
+  function wserror(err) {
+    console.log(connectionstate[websocket.readyState]);
+    // console.log("连接发生错误！",err);
+  }
+
+  //连接关闭的回调方法
+  function wsclose() {
+    console.log(connectionstate[websocket.readyState]);
+    // console.log("连接关闭！");
+  }
+
+
+  function wsmessage(event) {
+    console.warn("接收到的", event.data);
+
+    var jsondata = xml2json(event.data);
+    //console.log(jsondata);
+
+    if ( undefined != jsondata.message){
+      if( undefined != jsondata.message.body){
+        console.log("收到的消息：",jsondata.message.body);
+      } else if(undefined != jsondata.message.composing){
+        document.getElementById("isloginsuccess").innerHTML = "对方正在输入";
+      } else if(undefined != jsondata.message.gone){
+        document.getElementById("isloginsuccess").innerHTML = "对方已关闭和您的聊天";
+      } else if(undefined != jsondata.message.file){
+        console.log("收到的文件：",jsondata.message);
+      } else {
+
+      }
+    } else if (undefined != jsondata.open) {
+      //记录id	
+      id = jsondata.open["-id"];
+      console.log(id);
+    } else if (undefined != jsondata["stream:features"]) {
+      if (undefined != jsondata["stream:features"].mechanisms) {
+        //获取登录验证方式
+        auth(jsondata["stream:features"].mechanisms.mechanism[0]);
+      } else if(undefined != jsondata["stream:features"].bind){
+        bind();
+      } else {
+        //Do-nothing
+      }
+    } else if (undefined != jsondata.failure) {
+      islogin = false;
+      document.getElementById("isloginsuccess").innerHTML = "登录失败，用户名或者密码错误";
+      console.log("登录失败，用户名或者密码错误");
+    } else if (undefined != jsondata.success) {
+      islogin = true;
+      document.getElementById("isloginsuccess").innerHTML = "登录成功";
+      console.log("登录成功！");
+      //发起新的流
+      newopen();
+    } else if (undefined != jsondata.iq) {
+      if(undefined != jsondata.iq.bind){
+        //获取session会话
+        getsession();
+      } else {
+        presence();
+      }
+    } else {
+      //Do-nothing
+    }//if(undefined != jsondata["stream:features"])
+  }
+
+  //发起建立流的请求
+  function connwsopen() {
+    var temp = {
+      "open": {
+        "-to": to,
+        "-from": from,
+        "-xmlns": xmlns,
+        "-xml:lang": xmllang,
+        "-version": version
+      }
+    };
+    //转化为xml
+    var steam = json2xml(temp);
+    websocket.send(steam);
+  }
+
+  //发起新的流
+  function newopen() {
+    // <open xmlns='jabber:client' to='127.0.0.1' version='1.0' from='wuxinzhe@127.0.0.1' id='70tvu3ooiu' xml:lang='zh'/>
+    var temp = {
+      "open": {
+        "-xmlns": "jabber:client",
+        "-to": to,
+        "-version": version,
+        "-from": from,
+        "-id": id,
+        "-xml:lang": xmllang
+      }
+    };
+    //转化为xml
+    var steam = json2xml(temp);
+    websocket.send(steam);
+  }
+
+  //bind操作
+  function bind() {
+    var temp = {
+      "iq": {
+        "-id": id,
+        "-type": "set",
+        "bind": {
+          "-xmlns": "urn:ietf:params:xml:ns:xmpp-bind",
+          "resource":resource
+        }
+      }
+    };
+    //转化为xml
+    var steam = json2xml(temp);
+    websocket.send(steam);
+  }
+
+  //获取session
+  function getsession() {
+    //<iq xmlns="jabber:client" id="ak014gz6x7" type="set"><session xmlns="urn:ietf:params:xml:ns:xmpp-session"/></iq>
+    var temp = {
+      "iq": {
+        "-xmlns": "jabber:client",
+        "-id": id,
+        "-type": "set",
+        "session": {"-xmlns": "urn:ietf:params:xml:ns:xmpp-session"}
+      }
+    };
+    //转化为xml
+    var steam = json2xml(temp);
+    websocket.send(steam);
+  }
+
+  //上线
+  function presence() {
+    //<presence id="ak014gz6x7"><status>Online</status><priority>1</priority></presence>
+    var temp = {
+      "presence": {
+        "-id": id,
+        "status": "online",
+        "priority": "1"
+      }
+    };
+    //转化为xml
+    var steam = json2xml(temp);
+    websocket.send(steam);
+  }
+
+  //登录验证
+  function auth(authentication) {
+    //字符串格式是：jid+password，以\0作为分隔符
+    var temp = username + "@" + to + "\0" + password;
+    //Base64编码
+    var token = window.btoa(temp);
+    // var message = "<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>" + token + "</auth>";
+    var message = {
+      "auth": {
+        "-xmlns": "urn:ietf:params:xml:ns:xmpp-sasl",
+        "-mechanism": authentication,
+        "#text": token
+      }
+    };
+    websocket.send(json2xml(message));
+  }
+
+  //发消息
+  function send(number,message) {
+    var temp = {
+      "message": {
+        "-type":"chat",
+        "-from":  username+"@"+to,
+        "-to": number+"@"+to,
+        "subject":"标题",
+        "body": message
+      }
+    };
+    //转化为xml
+    var steam = json2xml(temp);
+    websocket.send(steam);
+  }
+
+  //json转xml
+  function json2xml(jsonstring) {
+
+    var xotree = new XML.ObjTree();
+    var xml = xotree.writeXML(jsonstring);
+    //使用jkl-dumper.js中的formatXml方法将xml字符串格式化
+    //var xmlText = formatXml(xml);
+    return xml;
+  }
+
+  //xml转json
+  function xml2json(xmlstring) {
+    //将xml字符串转为json
+    var xotree = new XML.ObjTree();
+    var json = xotree.parseXML(xmlstring);
+    //将json对象转为格式化的字符串
+    var dumper = new JKL.Dumper();
+    var jsonText = dumper.dump(json);
+    return JSON.parse(jsonText);
+  }
+
+
+
+
+  function login() {
+    username = document.getElementById("inputusername").value;
+    password = document.getElementById("inputpassword").value;
+    console.log("用户名：", username);
+    console.log("密码：", password);
+    from = username + "@" + to;
+    //创建websocket
+    websocket = new WebSocket(host, 'xmpp');
+    console.log(connectionstate[websocket.readyState]);
+    //连接成功建立的回调方法
+    websocket.onopen = wsopen;
+    //连接发生错误的回调方法
+    websocket.onerror = wserror;
+    //连接关闭的回调方法
+    websocket.onclose = wsclose;
+    websocket.onmessage = wsmessage;
+  }
+
+  //发送消息
+  function sendmessage(){
+    if(islogin){
+      var number = document.getElementById("sendnumber").value;
+      var message = document.getElementById("sendmessage").value;
+      console.log("接收者："+number,"消息内容："+message);
+      send(number,message);
+    } else {
+      document.getElementById("isloginsuccess").innerHTML = "请登录后发送消息！";
+    }
+  }
+
+
+  //var filename = null;
+
+  function sendfile() {
+    console.log(file);
+    var number = document.getElementById("sendnumber").value;
+
+    var temp = {
+      "msgid": "20180205100043073751",
+      "command": "CHATMESSAGE",
+      "to": "13121372109",
+      "msgcontent": file,
+      "sendmsgtime": "2018-02-05 10:00",
+      "msgtype": "1",
+      "from": "66666666666",
+      "ext": {
+      "datatype": "0"
+    }
+    }
+
+
+    send(number,JSON.stringify(temp));
+
+  }
+
+
+  //加入群
+  function joinroom() {
+    var temp = {
+      "presence": {
+        "-from": from,
+        "-id": id,
+        "-to": "ceshi聊天室6@conference.linux",
+        "x": { "-xmlns": "http://jabber.org/protocol/muc" }
+      }
+    }
+    //转化为xml
+    var steam = json2xml(temp);
+    websocket.send(steam);
+  }
+
+
+</script>
+
+<body>
+<div>
+  <h2>用户登录</h2>
+  <div>用户名：<input type="text" id="inputusername" value="17310133443"/></div>
+  <div>密码：<input type="password" id="inputpassword" value="e10adc3949ba59abbe56e057f20f883e"/></div>
+  <button onclick="login()">登录</button>
+  <br/> <br/> <br/>
+  <div>
+    信息：<span id="isloginsuccess"></span>
+  </div>
+  <br/> <br/> <br/>
+  <div>
+    接收者：<input type="text" id="sendnumber" value="18322696554"/>
+  </div>
+  <br/>
+  <textarea id="sendmessage" rows="5" cols="25"></textarea>
+  <div>
+    <button onclick="sendmessage()">发送消息</button>
+  </div>
+</div>
+
+<br/> <br/> <br/>
+<div>
+  <input type="file" name="myFile" id="myFile"/>
+  <button onclick="sendfile()">发送文件</button>
+</div>
+
+<br/> <br/> <br/>
+<div>
+  <button onclick="joinroom()">默认加入房间</button>
+  <button onclick="getroommessage()">获取该房间的10条消息</button>
+</div>
+
+
+<!--<div>
+  <h2>注册</h2>
+  <div>用户名：<input type="text" id="regusername" /></div>
+  <div>密码：<input type="password" id="regpassword"/></div>
+  <button onclick="regist()">注册</button>
+</div>-->
+</body>
+</html>
